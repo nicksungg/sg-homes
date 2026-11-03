@@ -15,7 +15,7 @@ VALUE = {"kind": "hdb", "id": "406|ANG MO KIO AVE 10", "type": "2 ROOM", "storey
 
 def check(base: str) -> int:
     with urllib.request.urlopen(base + "/", timeout=15) as r:
-        assert b"Lorong" in r.read(), "home page missing"
+        assert b"sg-home.com" in r.read(), "home page missing"
     with urllib.request.urlopen(base + "/data/listings.json", timeout=30) as r:
         assert len(json.load(r)["listings"]) > 1000, "listings missing"
     req = urllib.request.Request(base + "/api/value", data=json.dumps(VALUE).encode(),

@@ -1,4 +1,4 @@
-# Lorong: demo property portal
+# sg-home.com: demo property portal (code name Lorong)
 
 An original Singapore property portal built on [sg-homes](https://github.com/nicksungg/sg-homes):
 the usual listing-site features, plus the sg-homes 3D value map, home valuations and lease
@@ -41,7 +41,7 @@ and only `web/`, the generated JSON and the three sg-homes map files are served.
 | Area | What's there |
 |---|---|
 | Home | Live 3D city of all 13.5k valued blocks/projects (height = storeys, colour = estimated $ psf), search, below-estimate deals, HDB town explorer, backtest highlights |
-| Value map (`#/map`) | The sg-homes map inside Lorong: HDB footprints and condo/landed columns coloured by value, Lorong listings as white pins, search, flat-type and budget filters, block panels with estimates, unit valuation, lease outlook chart, recent sales and the homes listed there. Deep link `#/map?focus=hdb:<id>` |
+| Value map (`#/map`) | The sg-homes map inside Lorong: HDB footprints and condo/landed columns coloured by value, search, flat-type and budget filters, block panels with estimates, unit valuation, lease outlook chart, recent sales and the homes listed there. Deep link `#/map?focus=hdb:<id>` |
 | What's it worth? (`#/value`) | Pick a block/project, floor and size; get an estimate, range, recent sales, lease outlook; one click to list it (prefills the sell form) |
 | How we value (`#/about`) | Backtest results for each model and the lease-decay curve, read from the sg-homes eval reports |
 | Search | Buy/rent, keyword, property type, HDB town or district, price, bedrooms, size, tenure, floor level, MRT distance, listing age, furnishing, "below estimate only"; 6 sort orders; paging; list or map view with clustering and "Search this area" |
