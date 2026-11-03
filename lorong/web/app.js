@@ -479,9 +479,20 @@ const VM = {
   condo:  { name: "Condo",  ramp: ["#fbd3bf", "#f6ad8b", "#f08a5d", "#eb6834", "#c9501f", "#a03d15", "#77300f"] },
   landed: { name: "Landed", ramp: ["#bfeedd", "#8fdcbf", "#5cc89f", "#1baf7a", "#138e62", "#0d6e4c", "#08513a"] },
 };
-async function loadSG() {
-  if (S.sg) return S.sg;
+function loadSG() {
+  // One shared download, whether started by a page or by the idle prefetch.
+  S.sgP ??= fetchSG().catch(e => { S.sgP = null; throw e; });
+  return S.sgP;
+}
+async function fetchSG() {
   const [b, c, l] = await Promise.all(["blocks", "condo", "landed"].map(n => fetch(`/sg/${n}.json`).then(r => r.json())));
+  // Footprints arrive as integer deltas at 1e-5 degrees (see app.py encode_ring).
+  for (const x of b.blocks) if (x.pz) {
+    x.poly = x.pz.map(r => { const ring = []; let px = 0, py = 0;
+      for (let i = 0; i < r.length; i += 2) { px += r[i]; py += r[i + 1]; ring.push([px / 1e5, py / 1e5]); }
+      return ring; });
+    delete x.pz;
+  }
   S.sg = { hdb: b.blocks, condo: c.projects, landed: l.projects, meta: b.meta };
   S.sgById = Object.fromEntries(Object.entries({ hdb: b.blocks, condo: c.projects, landed: l.projects })
     .map(([k, arr]) => [k, Object.fromEntries(arr.map(x => [x.id, x]))]));
@@ -491,6 +502,17 @@ async function loadSG() {
 const placeName = (kind, x) => kind === "hdb" ? `Blk ${x.block} ${title(x.street)}`
   : x.project === "LANDED HOUSING DEVELOPMENT" ? `Landed homes, ${title(x.street)}` : title(x.project);
 const placeSub = (kind, x) => kind === "hdb" ? `HDB · ${title(x.town)}` : `${VM[kind].name} · ${title(x.street)} · D${x.district} (${x.segment})`;
+// The map data leaves out transactions; fetch them per place on demand.
+async function placeTx(kind, x) {
+  if (!x.tx) { const r = await api(`/api/ref?kind=${kind}&id=${encodeURIComponent(x.id)}`); x.tx = r.ok ? r.data.tx : null; }
+  return x.tx;
+}
+const txRows = (kind, x) => {
+  if (!x.tx) return `<p class="faint">Couldn't load transactions.</p>`;
+  const tx = x.tx.slice(0, 8);
+  return tx.length ? `<table class="t"><tr><th>Month</th><th>${kind === "hdb" ? "Type" : "Sale"}</th><th class="r">sqft</th><th class="r">Price</th></tr>
+    ${tx.map(t => `<tr><td>${t[0]}</td><td>${kind === "hdb" ? esc(title(t[1])) : esc(t[1])}</td><td class="r">${Math.round(t[3] * SQFT).toLocaleString("en-SG")}</td><td class="r">${fmt$(t[4])}</td></tr>`).join("")}</table>` : `<p class="faint">No sales in the last 5 years.</p>`;
+};
 const listedAt = (kind, id) => S.listings.filter(l => l.ref.kind === kind && l.ref.id === id);
 
 // Shared unit valuation form: place = sg-homes record. onResult(value, params) is called on success.
@@ -584,6 +606,8 @@ async function valueMapPage(main, q) {
     <div class="vm-tip" id="vmTip"></div>
     <div class="vm-loading" id="vmLoad">Loading every HDB block, condo and landed estate…</div>
   </div>`;
+  // Start the basemap while the value data downloads.
+  const m = newMap("vmMap", { center: [103.82, 1.35], zoom: 11.2, pitch: 45, bearing: -10, maxPitch: 70 });
   const sg = await loadSG();
   if (currentPath() !== "/map") return;
   $("#vmLoad").remove();
@@ -608,7 +632,6 @@ async function valueMapPage(main, q) {
     <p class="muted" style="margin:0 0 10px">${sg.hdb.length.toLocaleString("en-SG")} HDB blocks, ${sg.condo.length.toLocaleString("en-SG")} condo projects and ${sg.landed.length.toLocaleString("en-SG")} landed streets, coloured by estimated $ psf for ${sg.meta.valuation_month}.</p>
     <p class="faint" style="margin:0">Click a building to see estimates by flat type, value a specific unit, recent sales and the lease outlook. Drag to pan, right-drag to tilt.</p>
     <div class="row" style="margin-top:12px"><a class="btn small primary" href="#/value">Value my home</a><a class="btn small" href="#/about">How we value</a></div>`;
-  const m = newMap("vmMap", { center: [103.82, 1.35], zoom: 11.2, pitch: 45, bearing: -10, maxPitch: 70 });
   const overlay = new deck.MapboxOverlay({ interleaved: true, layers: [] });
   m.addControl(overlay);
   const tip = $("#vmTip");
@@ -658,7 +681,6 @@ async function valueMapPage(main, q) {
     p.scrollTop = 0;
     const listed = listedAt(kind, x.id);
     const lease = kind === "hdb" ? `${x.lease_start} (~${99 - (+S.meta.valuation_month.slice(0, 4) - x.lease_start)} yrs left)` : esc(x.tenure.replace(" lease commencing from", " from"));
-    const tx = x.tx.slice(0, 8);
     p.innerHTML = `<button class="close" aria-label="Close">×</button>
       <h2>${esc(placeName(kind, x))}</h2><div class="muted">${esc(placeSub(kind, x))}</div>
       <div class="facts"><div><span>${kind === "hdb" ? "Lease start" : "Tenure"}</span>${lease}</div><div><span>${kind === "landed" ? "Types" : "Storeys"}</span>${kind === "landed" ? esc(x.types.join(", ")) : x.floors ?? "–"}</div>
@@ -671,9 +693,7 @@ async function valueMapPage(main, q) {
         <td class="r"><b>${fmt$(u.est)}</b><br><span class="faint">${fmtK(u.lo)} – ${fmtK(u.hi)}</span></td><td class="r">${u.n}</td></tr>`).join("")}</table>
       <h3>Value a specific ${kind === "landed" ? "house" : "unit"}</h3><div id="vmForm"></div>
       ${kind === "hdb" ? `<h3>Lease outlook</h3><div id="vmProj"></div>` : ""}
-      <h3>Recent transactions</h3>
-      ${tx.length ? `<table class="t"><tr><th>Month</th><th>${kind === "hdb" ? "Type" : "Sale"}</th><th class="r">sqft</th><th class="r">Price</th></tr>
-        ${tx.map(t => `<tr><td>${t[0]}</td><td>${kind === "hdb" ? esc(title(t[1])) : esc(t[1])}</td><td class="r">${Math.round(t[3] * SQFT).toLocaleString("en-SG")}</td><td class="r">${fmt$(t[4])}</td></tr>`).join("")}</table>` : `<p class="faint">No sales in the last 5 years.</p>`}
+      <h3>Recent transactions</h3><div id="vmTx">${x.tx !== undefined ? txRows(kind, x) : `<p class="faint">Loading…</p>`}</div>
       <div class="row" style="margin-top:14px;flex-wrap:wrap">
         <a class="btn small" href="#/search?mode=sale&q=${encodeURIComponent(kind === "hdb" ? x.street : kind === "condo" ? x.project : x.street)}">Homes for sale nearby</a>
         ${kind === "condo" && S.projById[x.id] ? `<a class="btn small" href="#/project/${encodeURIComponent(x.id)}">Project page</a>` : ""}
@@ -684,6 +704,7 @@ async function valueMapPage(main, q) {
       if (kind === "hdb") projectionBlock($("#vmProj"), x.lease_start, v.est, `${title(prm.type)}, storey ${prm.floor}, ${(+prm.sqft).toLocaleString("en-SG")} sqft`);
     });
     if (kind === "hdb") projectionBlock($("#vmProj"), x.lease_start, typical.est, `Typical ${title(typical.type)}`);
+    if (x.tx === undefined) placeTx(kind, x).then(() => { if (st.sel && st.sel.x === x && $("#vmTx")) $("#vmTx").innerHTML = txRows(kind, x); });
     if (fly) m.flyTo({ center: [x.lon, x.lat], zoom: 17, pitch: 55, duration: 1400 });
     render();
   }
@@ -751,9 +772,9 @@ async function valuePage(main, q) {
       <a class="btn small" href="#/map?focus=${st.kind}:${encodeURIComponent(x.id)}">On map</a></div>`;
     valueForm($("#vForm"), st.kind, x, (v, prm) => showResult(v, prm), false);
   };
-  const showResult = (v, prm) => {
+  const showResult = async (v, prm) => {
     const x = st.x, kind = st.kind;
-    const same = x.tx.filter(t => kind !== "hdb" || t[1] === prm.type);
+    const same = ((await placeTx(kind, x)) || []).filter(t => kind !== "hdb" || t[1] === prm.type);
     const med = same.length ? same.map(t => t[4] / t[3]).sort((a, b) => a - b)[Math.floor(same.length / 2)] : null;
     const listed = listedAt(kind, x.id).filter(l => l.mode === "sale");
     const sellQ = qsBuild({ kind, id: x.id, sqft: prm.sqft, floor: prm.floor, type: prm.type });
@@ -1678,6 +1699,8 @@ Promise.all([
   compare = compare.filter(id => S.byId[id]);
   updateCounts();
   route();
+  // Most visits reach the value map or a valuation; fetch its data once the first page has settled.
+  setTimeout(() => loadSG().catch(() => {}), 2500);
 }).catch(err => {
   $("#main").innerHTML = `<div class="wrap"><div class="empty" style="margin:40px 0">Couldn't load data. Please try again in a moment.<br><span class="faint">${esc(err)}</span></div></div>`;
 });

@@ -1,6 +1,6 @@
 """Lorong server: static site, demo data, and APIs backed by sg-homes.
 
-GET  /sg/{blocks,condo,landed}.json            the sg-homes value map data
+GET  /sg/{blocks,condo,landed}.json            the sg-homes value map data, slimmed for the map
 GET  /api/health                              liveness + data/model check
 GET  /api/ref?kind=hdb|condo|landed&id=<id>   real block/project record (estimates, transactions)
 GET  /api/forecast                            HDB lease-decay curve + market scenarios
@@ -234,7 +234,7 @@ POST = {"/api/value": value, "/api/listings": post_listing, "/api/enquiries": po
 
 _hits: dict[str, deque] = defaultdict(deque)
 _hits_lock = threading.Lock()
-_gz_cache: dict[Path, tuple[float, bytes, bytes]] = {}
+_gz_cache: dict[Path, tuple[float, bytes, bytes, str]] = {}
 _gz_lock = threading.Lock()
 
 
@@ -251,24 +251,72 @@ def rate_limited(ip: str) -> bool:
         return False
 
 
-def file_bytes(path: Path) -> tuple[bytes, bytes]:
-    """Raw and gzipped file contents, cached until the file changes."""
+def simplify(pts: list[tuple[int, int]], tol: float) -> list[tuple[int, int]]:
+    """Douglas-Peucker: keep only the corners that move the outline by more than tol."""
+    if len(pts) < 3:
+        return pts
+    (ax, ay), (bx, by) = pts[0], pts[-1]
+    dx, dy = bx - ax, by - ay
+    norm = (dx * dx + dy * dy) ** 0.5
+    dist = [abs(dy * (x - ax) - dx * (y - ay)) / norm if norm else ((x - ax) ** 2 + (y - ay) ** 2) ** 0.5
+            for x, y in pts[1:-1]]
+    i = max(range(len(dist)), key=dist.__getitem__)
+    if dist[i] <= tol:
+        return [pts[0], pts[-1]]
+    return simplify(pts[:i + 2], tol)[:-1] + simplify(pts[i + 1:], tol)
+
+
+def encode_ring(ring: list) -> list[int]:
+    """Footprint ring as integers at 1e-5 degrees (~1 m), simplified to ~1 m: first point, then deltas."""
+    pts = [(round(lon * 1e5), round(lat * 1e5)) for lon, lat in ring]
+    pts = [p for i, p in enumerate(pts) if i == 0 or p != pts[i - 1]]
+    pts = simplify(pts, 1.0) if len(pts) > 4 else pts
+    out, px, py = [], 0, 0
+    for x, y in pts:
+        out += [x - px, y - py]
+        px, py = x, y
+    return out
+
+
+def slim_map_data(path: Path) -> bytes:
+    """The value map draws from estimates and footprints only. Transactions (fetched per place
+    through /api/ref) and full-precision footprints would make the download ~6x larger."""
+    data = json.loads(path.read_bytes())
+    for x in data.get("blocks", data.get("projects", [])):
+        x.pop("tx", None)
+        if x.get("poly"):
+            x["pz"] = [encode_ring(r) for r in x.pop("poly")]
+    return json.dumps(data, separators=(",", ":")).encode()
+
+
+def file_bytes(path: Path, transform=None) -> tuple[bytes, bytes, str]:
+    """Raw and gzipped file contents plus an ETag, cached until the file changes."""
     mtime = path.stat().st_mtime
     with _gz_lock:
         hit = _gz_cache.get(path)
         if hit and hit[0] == mtime:
-            return hit[1], hit[2]
-    raw = path.read_bytes()
-    gz = gzip.compress(raw, compresslevel=6)
+            return hit[1:]
+    raw = transform(path) if transform else path.read_bytes()
+    gz = gzip.compress(raw, compresslevel=9)
+    etag = f'"{int(mtime)}-{len(raw)}"'
     with _gz_lock:
-        _gz_cache[path] = (mtime, raw, gz)
-    return raw, gz
+        _gz_cache[path] = (mtime, raw, gz, etag)
+    return raw, gz, etag
 
 
 class Handler(SimpleHTTPRequestHandler):
     timeout = 30  # drop stalled connections
 
+    def send_header(self, keyword: str, value: str) -> None:
+        if keyword.lower() == "cache-control":
+            self._cache_set = True
+        super().send_header(keyword, value)
+
     def end_headers(self) -> None:
+        # Make browsers revalidate pages and scripts so a redeploy shows up on the next load.
+        if not getattr(self, "_cache_set", False):
+            self.send_header("Cache-Control", "no-cache")
+        self._cache_set = False
         self.send_header("X-Content-Type-Options", "nosniff")
         self.send_header("Referrer-Policy", "strict-origin-when-cross-origin")
         super().end_headers()
@@ -297,12 +345,18 @@ class Handler(SimpleHTTPRequestHandler):
             allowed, base = (DATA_FILES, ROOT / "data") if folder == "data" else (SG_FILES, SG / "web" / "data")
             if name not in allowed:
                 return self.send_json(404, {"error": "not found"})
-            raw, gz = file_bytes(base / name)
+            raw, gz, etag = file_bytes(base / name, slim_map_data if folder == "sg" else None)
+            if self.headers.get("If-None-Match") == etag:
+                self.send_response(304)
+                self.send_header("ETag", etag)
+                self.end_headers()
+                return
             use_gz = "gzip" in self.headers.get("Accept-Encoding", "")
             data = gz if use_gz else raw
             self.send_response(200)
             self.send_header("Content-Type", "application/json")
             self.send_header("Cache-Control", "no-cache")
+            self.send_header("ETag", etag)
             if use_gz:
                 self.send_header("Content-Encoding", "gzip")
             self.send_header("Vary", "Accept-Encoding")
@@ -345,4 +399,6 @@ if __name__ == "__main__":
         raise SystemExit(f"missing data/{missing}; run generate.py first")
     port = int(sys.argv[1]) if len(sys.argv) > 1 else 8780
     print(f"Lorong on http://localhost:{port} (sg-homes: {SG})", flush=True)
+    # Build the slimmed map files now so the first visitor doesn't wait for them.
+    threading.Thread(target=lambda: [file_bytes(SG / "web" / "data" / f, slim_map_data) for f in SG_FILES], daemon=True).start()
     ThreadingHTTPServer(("127.0.0.1", port), partial(Handler, directory=str(ROOT / "web"))).serve_forever()
