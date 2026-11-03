@@ -9,12 +9,14 @@ Uses the same nowcast features and models as the batch scoring, overriding only
 the unit's own attributes.
 """
 import json
+import logging
+import math
 import sys
-from functools import partial
-from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
-from urllib.parse import parse_qs, urlparse
+from threading import Lock
 
 import pandas as pd
+from flask import Flask, jsonify, request, send_from_directory
+from waitress import serve
 
 from private import SIZE_BANDS
 from score import DATA, ROOT, Valuer
@@ -51,7 +53,7 @@ def estimate_hdb(params: dict) -> tuple[int, dict]:
     row = HDB.loc[[(block, street, flat_type)]].reset_index()
     max_floor = row.max_floor_lvl.iat[0]
     lo, hi = SQM_RANGE["hdb"]
-    if not lo <= sqm <= hi or storey < 1 or (pd.notna(max_floor) and storey > max_floor):
+    if not lo <= sqm <= hi or not math.isfinite(storey) or storey < 1 or (pd.notna(max_floor) and storey > max_floor):
         return 400, {"error": f"storey must be 1–{max_floor:.0f}, sqm {lo}–{hi}"}
     typical = float(row.floor_area_sqm.iat[0])
     warnings = size_warning(sqm, typical, flat_type.lower())
@@ -80,7 +82,7 @@ def estimate_private(params: dict) -> tuple[int, dict]:
         except (KeyError, ValueError):
             return 400, {"error": "need floor"}
         top = rows.max_floor.iat[0]
-        if floor < -5 or (pd.notna(top) and floor > top + 5):
+        if not math.isfinite(floor) or floor < -5 or (pd.notna(top) and floor > top + 5):
             return 400, {"error": f"floor must be up to about {top:.0f} (highest sold here)"}
         # Use the project's size band containing sqm, else the nearest band sold here.
         order = {b[2]: (b[0] + min(b[1], 300)) / 2 for b in SIZE_BANDS}
@@ -105,21 +107,58 @@ def estimate_private(params: dict) -> tuple[int, dict]:
 ROUTES = {"/api/estimate": estimate_hdb, "/api/estimate_private": estimate_private}
 
 
-class Handler(SimpleHTTPRequestHandler):
-    def do_GET(self) -> None:
-        url = urlparse(self.path)
-        if url.path not in ROUTES:
-            return super().do_GET()
-        status, body = ROUTES[url.path]({k: v[0] for k, v in parse_qs(url.query).items()})
-        data = json.dumps(body).encode()
-        self.send_response(status)
-        self.send_header("Content-Type", "application/json")
-        self.send_header("Content-Length", str(len(data)))
-        self.end_headers()
-        self.wfile.write(data)
+app = Flask(__name__, static_folder=None)
+INFERENCE_LOCK = Lock()
+WEB = ROOT / "web"
+ALLOWED_ORIGINS = {"https://nicksungg.github.io"}
+PUBLIC_FILES = {"index.html", "config.js", "data/blocks.json", "data/condo.json", "data/landed.json"}
+
+
+@app.after_request
+def response_headers(response):
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+    if request.path.startswith("/api/"):
+        response.headers["Cache-Control"] = "no-store"
+        response.headers["Vary"] = "Origin"
+        if request.headers.get("Origin") in ALLOWED_ORIGINS:
+            response.headers["Access-Control-Allow-Origin"] = request.headers["Origin"]
+    return response
+
+
+@app.get("/api/health")
+def health():
+    return jsonify(status="ok", models=list(VALUERS))
+
+
+@app.get("/api/estimate")
+@app.get("/api/estimate_private")
+def estimate():
+    if len(request.query_string) > 4096:
+        return jsonify(error="Query is too long"), 400
+    if not INFERENCE_LOCK.acquire(timeout=5):
+        return jsonify(error="Valuation server is busy. Please try again shortly."), 503
+    try:
+        status, body = ROUTES[request.path](request.args.to_dict())
+        return jsonify(body), status
+    except Exception:
+        app.logger.exception("Valuation request failed")
+        return jsonify(error="Unable to value this home. Please try again."), 500
+    finally:
+        INFERENCE_LOCK.release()
+
+
+@app.get("/")
+@app.get("/<path:filename>")
+def static_file(filename="index.html"):
+    if filename not in PUBLIC_FILES:
+        return jsonify(error="Not found"), 404
+    return send_from_directory(WEB, filename)
 
 
 if __name__ == "__main__":
     port = int(sys.argv[1]) if len(sys.argv) > 1 else 8765
-    print(f"serving http://localhost:{port}")
-    ThreadingHTTPServer(("127.0.0.1", port), partial(Handler, directory=str(ROOT / "web"))).serve_forever()
+    logging.basicConfig(level=logging.INFO)
+    print(f"serving http://localhost:{port}", flush=True)
+    serve(app, host="127.0.0.1", port=port, threads=4, connection_limit=32,
+          channel_timeout=30, max_request_header_size=16384, max_request_body_size=1024)

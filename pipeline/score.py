@@ -5,6 +5,7 @@ and export the map data to web/data/.
 lagged, exactly as in training).
 """
 import json
+import os
 from pathlib import Path
 
 import lightgbm as lgb
@@ -71,9 +72,10 @@ class Valuer:
             u[c] = pd.Categorical(u[c].astype(str), categories=values)
         X = u[self.features]
         area_mkt = u.mkt_psm * u.floor_area_sqm
-        u["est"] = np.exp(self.models["point"].predict(X)) * area_mkt
-        u["lo"] = np.exp(self.models["p10"].predict(X) - self.offset) * area_mkt
-        u["hi"] = np.exp(self.models["p90"].predict(X) + self.offset) * area_mkt
+        options = {"num_threads": int(os.environ.get("SG_HOMES_MODEL_THREADS", "2"))}
+        u["est"] = np.exp(self.models["point"].predict(X, **options)) * area_mkt
+        u["lo"] = np.exp(self.models["p10"].predict(X, **options) - self.offset) * area_mkt
+        u["hi"] = np.exp(self.models["p90"].predict(X, **options) + self.offset) * area_mkt
         # Quantile models are fit independently; keep the band around the point estimate.
         u["lo"] = np.minimum(u.lo, u.est)
         u["hi"] = np.maximum(u.hi, u.est)

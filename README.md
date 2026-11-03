@@ -72,21 +72,60 @@ assumes a straight line to $0 at 99 years (shown dashed). SERS/VERS are not mode
 - Unit valuation only covers flat/house types that have sold in that block or project.
 - The decay band covers curve uncertainty only, not valuation error or market risk.
 
-## Public website
+## Public website and local hosting
 
-The free static edition is published at https://nicksungg.github.io/sg-homes/.
-It includes map layers, search, filters, existing estimates and HDB scenarios.
-Custom size/floor valuation forms remain available through the local Python server.
+Website: https://nicksungg.github.io/sg-homes/
+Full self-hosted site and API: https://sg-homes.tail90d697.ts.net/
+Local managed server: http://localhost:8767/
 
-Pushes to `main` deploy the public edition through `.github/workflows/pages.yml`.
-To preview the same artifact locally:
+The GitHub Pages map calls the valuation API on this computer for custom size/floor
+estimates. `deploy/public-host.json` supplies the public HTTPS address when the
+Pages artifact is built. `web/config.js` uses the same-origin API for the local
+and self-hosted editions. The computer must remain awake and online for custom
+valuations. The GitHub map and existing estimates remain available during outages.
+
+The Python server uses Waitress, bounds model prediction threads, serializes
+inference, and only serves the map's five public files. The URA key, raw archives,
+model files, Tailscale credentials and virtual environment are not published.
+Install Python dependencies with `.venv/bin/python -m pip install -r requirements.txt`.
+
+### Services on this computer
+
+- `sg-homes.service`: map and valuation server, listening on loopback port 8767.
+- `sg-homes-tailscale.service`: separate userspace Tailscale node named `sg-homes`,
+  signed into the website owner's account, preserving the existing system VPN.
+- `sg-homes-health.timer`: every two minutes calls a real HDB valuation, recovers
+  a failed local server, and separately checks the public valuation endpoint.
+
+Units are installed from `deploy/` into `~/.config/systemd/user/` and enabled.
+User lingering is enabled, so they start at boot without an interactive login.
+The Funnel setting persists in the dedicated node's private state directory.
+Its authentication and certificates live under `~/.local/state/sg-homes-tailscale/`,
+not in this repository. Tailscale may require account reauthorization when the
+node key expires; the public monitor records that as unreachable.
 
 ```sh
-python3 scripts/build-pages.py
-python3 -m http.server 8766 --directory dist
+systemctl --user status sg-homes.service sg-homes-tailscale.service
+systemctl --user restart sg-homes.service
+systemctl --user list-timers sg-homes-health.timer
+journalctl --user -u sg-homes.service -u sg-homes-health.service -n 50
+cat data/logs/hosting-health.json
+tailscale --socket=/run/user/1000/sg-homes-tailscale/tailscaled.sock funnel status
 ```
 
+After a data refresh, restart `sg-homes.service` to load the updated models.
+To stop public access while keeping the local server running:
+
+```sh
+tailscale --socket=/run/user/1000/sg-homes-tailscale/tailscaled.sock funnel --https=443 off
+```
+
+### Publishing updates
+
+Pushes to `main` deploy through `.github/workflows/pages.yml`. To preview the
+same artifact, run `python3 scripts/build-pages.py`, then
+`python3 -m http.server 8766 --directory dist`.
+
 To update public estimates, run `./refresh.sh` locally, inspect its outputs,
-then commit and push the updated `web/data/` files. Publishing does not retrain
-models or fetch new transactions automatically. Keep the URA key in `.env`;
-raw archives, models and the virtual environment are excluded from Git.
+restart the managed server, then commit and push the updated `web/data/` files.
+Publishing does not retrain models or fetch new transactions automatically.

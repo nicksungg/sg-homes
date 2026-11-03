@@ -126,6 +126,7 @@
 
 <script>
 const API_ENABLED = window.SG_HOMES_CONFIG?.apiEnabled !== false;
+const API_BASE = window.SG_HOMES_CONFIG?.apiBase || "";
 const SQFT = 10.7639;
 const KINDS = {
   hdb:    { name: "HDB",    ramp: ["#b7d3f6", "#86b6ef", "#5598e7", "#2a78d6", "#1c5cab", "#104281", "#0d366b"] },
@@ -373,9 +374,10 @@ async function callApi(path, params, describe) {
   out.textContent = "Valuing…";
   let r;
   try {
-    r = await (await fetch(path + "?" + new URLSearchParams(params))).json();
+    const url = API_BASE ? API_BASE.replace(/\/$/, "") + "/" + path : path;
+    r = await (await fetch(url + "?" + new URLSearchParams(params), { signal: AbortSignal.timeout(20000) })).json();
   } catch {
-    out.innerHTML = '<span class="warn">Unit valuation needs the API server: run pipeline/server.py</span>';
+    out.innerHTML = '<span class="warn">The valuation server is temporarily unavailable. Please try again shortly.</span>';
     return null;
   }
   if (r.error) { out.innerHTML = `<span class="warn">${r.error}</span>`; return null; }

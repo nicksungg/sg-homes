@@ -1,0 +1,9 @@
+[Unit]
+Description=Check Singapore home valuations and recover the local server
+After=sg-homes.service
+
+[Service]
+Type=oneshot
+WorkingDirectory=/home/nicksung/Desktop/nicksung/sg-homes
+ExecStart=/home/nicksung/Desktop/nicksung/sg-homes/.venv/bin/python scripts/check-host.py
+TimeoutStartSec=90

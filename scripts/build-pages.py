@@ -1,4 +1,4 @@
-"""Package the public map without Python APIs or private inputs."""
+"""Package the public map and connect an optional self-hosted valuation API."""
 import json
 import shutil
 from pathlib import Path
@@ -8,7 +8,12 @@ OUT = ROOT / "dist"
 if OUT.exists():
     shutil.rmtree(OUT)
 shutil.copytree(ROOT / "web", OUT)
-(OUT / "config.js").write_text("window.SG_HOMES_CONFIG = { apiEnabled: false };\n")
+host = ROOT / "deploy/public-host.json"
+base = json.loads(host.read_text()).get("public_url") if host.exists() else None
+if base and not base.startswith("https://"):
+    raise ValueError("The public API must use HTTPS")
+config = {"apiEnabled": bool(base), "apiBase": base or ""}
+(OUT / "config.js").write_text("window.SG_HOMES_CONFIG = " + json.dumps(config) + ";\n")
 (OUT / ".nojekyll").touch()
 for name, key in [("blocks", "blocks"), ("condo", "projects"), ("landed", "projects")]:
     path = OUT / "data" / f"{name}.json"

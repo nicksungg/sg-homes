@@ -1,0 +1,18 @@
+[Unit]
+Description=Dedicated Tailscale connection for Singapore home website
+After=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/usr/sbin/tailscaled --tun=userspace-networking --statedir=%h/.local/state/sg-homes-tailscale --socket=%t/sg-homes-tailscale/tailscaled.sock --port=0
+RuntimeDirectory=sg-homes-tailscale
+RuntimeDirectoryMode=0700
+StateDirectory=sg-homes-tailscale
+StateDirectoryMode=0700
+Restart=always
+RestartSec=5
+NoNewPrivileges=true
+UMask=0077
+
+[Install]
+WantedBy=default.target

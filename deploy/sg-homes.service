@@ -1,0 +1,20 @@
+[Unit]
+Description=Singapore home map and valuation API
+After=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/home/nicksung/Desktop/nicksung/sg-homes/pipeline
+ExecStart=/home/nicksung/Desktop/nicksung/sg-homes/.venv/bin/python -u server.py 8767
+Environment=OMP_NUM_THREADS=2
+Environment=OPENBLAS_NUM_THREADS=2
+Environment=SG_HOMES_MODEL_THREADS=2
+Restart=always
+RestartSec=5
+TimeoutStopSec=15
+NoNewPrivileges=true
+PrivateTmp=true
+UMask=0077
+
+[Install]
+WantedBy=default.target
