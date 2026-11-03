@@ -1,0 +1,623 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SG Home Values</title>
+<meta name="description" content="Explore estimated Singapore HDB, condo and landed home values on an interactive map.">
+<script src="config.js"></script>
+<link rel="icon" href="data:,">
+<link rel="stylesheet" href="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.css">
+<script src="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.js"></script>
+<script src="https://unpkg.com/deck.gl@9.0.38/dist.min.js"></script>
+<style>
+  :root {
+    --surface: #fcfcfb; --surface-2: #f3f2ef; --border: #e2e1dc;
+    --text: #0b0b0b; --text-2: #52514e; --text-3: #85847e;
+    font: 14px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif; color: var(--text);
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; background: var(--surface); }
+  #map { position: absolute; inset: 0; }
+  .bar {
+    position: absolute; top: 12px; left: 12px; right: 12px; z-index: 2;
+    display: flex; flex-wrap: wrap; gap: 8px; align-items: center;
+    background: var(--surface); border: 1px solid var(--border); border-radius: 10px;
+    padding: 8px 12px; box-shadow: 0 2px 10px rgb(0 0 0 / .08); max-width: 1180px;
+  }
+  .bar h1 { font-size: 15px; margin: 0 8px 0 0; white-space: nowrap; }
+  .bar input, .bar select, .bar button {
+    font: inherit; padding: 5px 8px; border: 1px solid var(--border); border-radius: 6px;
+    background: var(--surface); color: var(--text);
+  }
+  .bar button[aria-pressed="true"] { background: var(--text); color: var(--surface); }
+  .search { position: relative; flex: 1 1 220px; }
+  .search input { width: 100%; }
+  #results {
+    position: absolute; top: 100%; left: 0; right: 0; margin: 4px 0 0; padding: 4px 0;
+    list-style: none; background: var(--surface); border: 1px solid var(--border);
+    border-radius: 6px; box-shadow: 0 4px 14px rgb(0 0 0 / .1); display: none;
+  }
+  #results li { padding: 5px 10px; cursor: pointer; display: flex; gap: 8px; align-items: baseline; }
+  #results li:hover { background: var(--surface-2); }
+  .kind { font-size: 11px; color: var(--text-3); text-transform: uppercase; letter-spacing: .03em; min-width: 46px; }
+  .budget { display: flex; align-items: center; gap: 4px; color: var(--text-2); }
+  .budget input { width: 110px; }
+  .layers { display: flex; gap: 10px; color: var(--text-2); }
+  .layers label { display: flex; gap: 4px; align-items: center; cursor: pointer; }
+  .layers .dot { width: 10px; height: 10px; border-radius: 3px; display: inline-block; }
+  .legend {
+    position: absolute; left: 12px; bottom: 28px; z-index: 2; background: var(--surface);
+    border: 1px solid var(--border); border-radius: 10px; padding: 8px 12px; font-size: 12px;
+  }
+  .legend .title { color: var(--text-2); margin: 6px 0 3px; }
+  .legend .title:first-child { margin-top: 0; }
+  .legend .row { display: flex; gap: 2px; }
+  .legend .sw { width: 48px; height: 10px; border-radius: 2px; }
+  .legend .labels { display: flex; gap: 2px; color: var(--text-3); }
+  .legend .labels span { width: 48px; }
+  .legend .meta { margin-top: 8px; color: var(--text-3); }
+  #panel {
+    position: absolute; top: 76px; right: 12px; bottom: 28px; width: 390px; z-index: 2;
+    background: var(--surface); border: 1px solid var(--border); border-radius: 10px;
+    box-shadow: 0 2px 10px rgb(0 0 0 / .08); overflow-y: auto; padding: 16px; display: none;
+  }
+  #panel h2 { margin: 0; font-size: 18px; padding-right: 20px; }
+  #panel .sub { color: var(--text-2); margin-bottom: 12px; }
+  #panel .close { position: absolute; top: 10px; right: 10px; border: 0; background: none; font-size: 20px; cursor: pointer; color: var(--text-2); }
+  .facts { display: grid; grid-template-columns: 1fr 1fr; gap: 6px 12px; margin-bottom: 14px; }
+  .facts div span { display: block; color: var(--text-3); font-size: 12px; }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; font-variant-numeric: tabular-nums; }
+  th { text-align: left; color: var(--text-3); font-weight: 500; font-size: 12px; padding: 4px 4px 4px 0; border-bottom: 1px solid var(--border); }
+  td { padding: 5px 4px 5px 0; border-bottom: 1px solid var(--surface-2); }
+  td.num, th.num { text-align: right; }
+  .est { font-weight: 600; }
+  .range { color: var(--text-3); font-size: 12px; }
+  h3 { font-size: 13px; margin: 18px 0 6px; color: var(--text-2); font-weight: 600; }
+  .note { color: var(--text-3); font-size: 12px; margin-top: 8px; }
+  .unit-form { display: grid; grid-template-columns: 1.4fr 1fr 1fr auto; gap: 6px; align-items: end; }
+  .unit-form.two { grid-template-columns: 1fr 1fr auto; }
+  .unit-form label { font-size: 12px; color: var(--text-3); display: flex; flex-direction: column; gap: 2px; }
+  .unit-form input, .unit-form select, .unit-form button, .seg button {
+    font: inherit; font-size: 13px; padding: 5px 6px; border: 1px solid var(--border); border-radius: 6px;
+    background: var(--surface); color: var(--text); min-width: 0;
+  }
+  .unit-form button { background: var(--text); color: var(--surface); cursor: pointer; }
+  .unit-result { margin-top: 8px; padding: 8px 10px; background: var(--surface-2); border-radius: 6px; display: none; }
+  .unit-result .big { font-size: 18px; font-weight: 600; }
+  .warn { color: #9a5b00; font-size: 12px; margin-top: 4px; }
+  .seg { display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: 6px; }
+  .seg button { cursor: pointer; font-size: 12px; padding: 3px 8px; }
+  .seg button[aria-pressed="true"] { background: var(--text); color: var(--surface); border-color: var(--text); }
+  .headline { margin: 4px 0 8px; }
+  .chart svg { width: 100%; height: 155px; display: block; }
+  .chart .axis { fill: var(--text-3); font-size: 10px; }
+  .chart .grid { stroke: var(--surface-2); }
+  #tip {
+    position: absolute; z-index: 3; pointer-events: none; background: var(--text); color: var(--surface);
+    padding: 6px 8px; border-radius: 6px; font-size: 12px; display: none; white-space: nowrap;
+  }
+  #loading { position: absolute; inset: 0; display: grid; place-items: center; z-index: 4; background: var(--surface); color: var(--text-2); }
+  @media (max-width: 640px) {
+    #panel { left: 12px; right: 12px; width: auto; top: auto; height: 55%; }
+    .legend { display: none; }
+  }
+</style>
+</head>
+<body>
+<div id="map"></div>
+<div class="bar">
+  <h1>SG Home Values</h1>
+  <div class="search">
+    <input id="q" placeholder="Search block, street or condo, e.g. 406 ang mo kio, chuan park" autocomplete="off">
+    <ul id="results"></ul>
+  </div>
+  <div class="layers" id="layers"></div>
+  <select id="type" aria-label="HDB flat type">
+    <option value="">HDB: all types ($ psf)</option>
+  </select>
+  <label class="budget">Max $ <input id="budget" type="number" step="50000" min="0" placeholder="any"></label>
+  <button id="toggle3d" aria-pressed="true">3D</button>
+</div>
+<div class="legend" id="legend"></div>
+<aside id="panel"></aside>
+<div id="tip"></div>
+<div id="loading">Loading homes…</div>
+
+<script>
+const API_ENABLED = window.SG_HOMES_CONFIG?.apiEnabled !== false;
+const SQFT = 10.7639;
+const KINDS = {
+  hdb:    { name: "HDB",    ramp: ["#b7d3f6", "#86b6ef", "#5598e7", "#2a78d6", "#1c5cab", "#104281", "#0d366b"] },
+  condo:  { name: "Condo",  ramp: ["#fbd3bf", "#f6ad8b", "#f08a5d", "#eb6834", "#c9501f", "#a03d15", "#77300f"] },
+  landed: { name: "Landed", ramp: ["#bfeedd", "#8fdcbf", "#5cc89f", "#1baf7a", "#138e62", "#0d6e4c", "#08513a"] },
+};
+const NONE = [217, 216, 211, 140], SELECTED = [11, 11, 11];
+const hex = h => [1, 3, 5].map(i => parseInt(h.slice(i, i + 2), 16));
+const fmt$ = v => "$" + Math.round(v).toLocaleString("en-SG");
+const fmtK = v => v >= 1e6 ? "$" + (v / 1e6).toFixed(2) + "M" : "$" + Math.round(v / 1e3) + "k";
+const psf = psm => Math.round(psm / SQFT);
+const sqft = sqm => Math.round(sqm * SQFT).toLocaleString("en-SG");
+const title = s => s.toLowerCase().replace(/\b\w/g, c => c.toUpperCase());
+const privName = p => p.project === "LANDED HOUSING DEVELOPMENT" ? `Landed homes, ${title(p.street)}` : title(p.project);
+
+const state = { type: "", budget: null, is3d: true, sel: null, scenario: 2, unit: null,
+                show: { hdb: true, condo: true, landed: true } };
+const DATA = {}, META = {}, breaks = {};
+
+const map = new maplibregl.Map({
+  container: "map",
+  style: "https://basemaps.cartocdn.com/gl/positron-gl-style/style.json",
+  center: [103.82, 1.35], zoom: 11.2, pitch: 45, bearing: -10, maxPitch: 70,
+  attributionControl: { customAttribution: "Data: HDB, URA, LTA, MOE via data.gov.sg; URA Data Service; OneMap" },
+});
+map.addControl(new maplibregl.NavigationControl(), "bottom-right");
+const overlay = new deck.MapboxOverlay({ interleaved: true, layers: [] });
+map.addControl(overlay);
+
+// ---------- colour ----------
+function metric(kind, x) {
+  if (kind === "hdb" && state.type) {
+    const u = x.units.find(u => u.type === state.type);
+    return u ? u.est : null;
+  }
+  return x.psm;
+}
+const hdbByPrice = () => !!state.type;
+
+function computeBreaks() {
+  for (const kind of Object.keys(KINDS)) {
+    const v = DATA[kind].map(x => metric(kind, x)).filter(x => x != null).sort((a, b) => a - b);
+    const n = KINDS[kind].ramp.length;
+    breaks[kind] = KINDS[kind].ramp.slice(1).map((_, i) => v[Math.floor(v.length * (i + 1) / n)]);
+  }
+}
+
+function colorOf(kind, x) {
+  if (state.sel && state.sel.item === x) return SELECTED;
+  const m = metric(kind, x);
+  if (m == null) return NONE;
+  if (state.budget) {
+    const affordable = kind === "hdb" && state.type ? m <= state.budget : x.units.some(u => u.est <= state.budget);
+    if (!affordable) return NONE;
+  }
+  const b = breaks[kind];
+  let i = 0;
+  while (i < b.length && m >= b[i]) i++;
+  return hex(KINDS[kind].ramp[i]);
+}
+
+function renderLegend() {
+  const rows = Object.entries(KINDS).filter(([k]) => state.show[k]).map(([k, K]) => {
+    const priced = k === "hdb" && hdbByPrice();
+    const label = priced ? `HDB est. price, ${title(state.type)}` : `${K.name} est. $ psf`;
+    const lab = e => {
+      if (priced) return fmtK(e);
+      const v = psf(e);
+      return v >= 1000 ? "$" + (v / 1000).toFixed(2) + "k" : "$" + v;
+    };
+    return `<div class="title">${label}</div>
+      <div class="row">${K.ramp.map(c => `<div class="sw" style="background:${c}"></div>`).join("")}</div>
+      <div class="labels"><span></span>${breaks[k].map(e => `<span>${lab(e)}</span>`).join("")}</div>`;
+  }).join("");
+  const ev = k => (META[k].eval.MdAPE * 100).toFixed(1) + "%";
+  document.getElementById("legend").innerHTML = rows + `
+    <div class="meta">${state.budget ? `Grey = nothing under ${fmtK(state.budget)} · ` : ""}Valuation ${META.hdb.valuation_month}<br>
+    Backtest median error: HDB ${ev("hdb")} · condo ${ev("condo")} · landed ${ev("landed")}</div>`;
+}
+
+// ---------- layers ----------
+function tooltip(kind, x) {
+  if (kind === "hdb") {
+    const m = metric(kind, x);
+    return `<b>Blk ${x.block} ${title(x.street)}</b><br>` +
+      (m == null ? "No sales of this flat type" : hdbByPrice() ? fmt$(m) : `$${psf(m).toLocaleString("en-SG")} psf`);
+  }
+  return `<b>${privName(x)}</b><br>${KINDS[kind].name} · D${x.district} · $${psf(x.psm).toLocaleString("en-SG")} psf`;
+}
+
+function hover({ object, x, y, layer }) {
+  const tip = document.getElementById("tip");
+  if (!object) { tip.style.display = "none"; return; }
+  tip.innerHTML = tooltip(layer.id, object);
+  Object.assign(tip.style, { display: "block", left: x + 14 + "px", top: y + 14 + "px" });
+}
+
+function render() {
+  const trig = [state.type, state.budget, state.sel && state.sel.item, breaks];
+  const common = kind => ({
+    pickable: true, autoHighlight: true, highlightColor: [255, 190, 60, 220],
+    getFillColor: x => colorOf(kind, x), onHover: hover, onClick: ({ object }) => object && select(kind, object),
+    updateTriggers: { getFillColor: trig, extruded: state.is3d },
+  });
+  const layers = [];
+  if (state.show.hdb) layers.push(new deck.PolygonLayer({
+    id: "hdb", data: DATA.hdb.filter(b => b.poly), getPolygon: b => b.poly,
+    extruded: state.is3d, getElevation: b => (b.floors || 4) * 3,
+    material: { ambient: 0.55, diffuse: 0.5, shininess: 8 }, ...common("hdb"),
+  }));
+  if (state.show.condo) layers.push(new deck.ColumnLayer({
+    id: "condo", data: DATA.condo, getPosition: p => [p.lon, p.lat], radius: 22, diskResolution: 16,
+    extruded: state.is3d, getElevation: p => Math.max(p.floors || 5, 4) * 3.2,
+    material: { ambient: 0.55, diffuse: 0.5, shininess: 8 }, ...common("condo"),
+  }));
+  if (state.show.landed) layers.push(new deck.ColumnLayer({
+    id: "landed", data: DATA.landed, getPosition: p => [p.lon, p.lat], radius: 14, diskResolution: 12,
+    extruded: state.is3d, getElevation: 9,
+    material: { ambient: 0.55, diffuse: 0.5, shininess: 8 }, ...common("landed"),
+  }));
+  overlay.setProps({ layers });
+  renderLegend();
+}
+
+// ---------- panel ----------
+const leaseLeft = start => 99 - (+META.hdb.valuation_month.slice(0, 4) - start);
+const typicalUnit = b => state.type && b.units.find(u => u.type === state.type) || [...b.units].sort((a, c) => c.n - a.n)[0];
+
+function select(kind, x, fly = false) {
+  state.sel = { kind, item: x };
+  state.unit = null;
+  history.replaceState(null, "", "#" + kind + ":" + encodeURIComponent(x.id));
+  const p = document.getElementById("panel");
+  p.innerHTML = `<button class="close" aria-label="Close">×</button>` + (kind === "hdb" ? hdbPanel(x) : privatePanel(kind, x));
+  p.style.display = "block";
+  p.scrollTop = 0;
+  p.querySelector(".close").onclick = () => { p.style.display = "none"; state.sel = null; render(); };
+  if (!API_ENABLED) {
+    p.querySelector(".valuation-controls").remove();
+    p.querySelector(".valuation-note").hidden = false;
+  }
+  if (kind === "hdb") { if (API_ENABLED) bindHdbForm(x); drawForecast(x); drawHdbChart(x); }
+  else { if (API_ENABLED) bindPrivateForm(kind, x); drawPrivateChart(kind, x); }
+  if (fly) map.flyTo({ center: [x.lon, x.lat], zoom: 17, pitch: 55, duration: 1500 });
+  render();
+}
+
+// Condo size bands come from the pipeline in sqm ("50–80 sqm", "Under 50 sqm", "150+ sqm"); show sqft.
+function unitLabel(type) {
+  const m = type.match(/^(Under )?(\d+)(?:–(\d+))?(\+)? sqm$/);
+  if (!m) return title(type);
+  const [, under, a, b, plus] = m;
+  if (under) return `Under ${sqft(+a)} sqft`;
+  if (plus) return `${sqft(+a)}+ sqft`;
+  return `${sqft(+a)}–${sqft(+b)} sqft`;
+}
+
+function estimatesTable(units, sizeCol) {
+  return `<table><tr><th>Type</th><th class="num">Size</th><th class="num">Estimate (80% range)</th><th class="num">Sales</th></tr>
+    ${units.map(u => `<tr><td>${unitLabel(u.type)}</td><td class="num">${sizeCol(u)}</td>
+      <td class="num"><span class="est">${fmt$(u.est)}</span><br><span class="range">${fmtK(u.lo)} – ${fmtK(u.hi)}</span></td>
+      <td class="num">${u.n}</td></tr>`).join("")}</table>`;
+}
+
+function hdbPanel(b) {
+  const tx = b.tx.map(t => `<tr><td>${t[0]}</td><td>${title(t[1])}</td><td>${t[2].replace(" TO ", "–")}</td><td class="num">${fmt$(t[4])}</td></tr>`).join("");
+  return `
+    <h2>Blk ${b.block} ${title(b.street)}</h2>
+    <div class="sub">HDB · ${title(b.town)}</div>
+    <div class="facts">
+      <div><span>Lease start</span>${b.lease_start} (~${leaseLeft(b.lease_start)} yrs left)</div>
+      <div><span>Storeys</span>${b.floors ?? "–"}</div>
+      <div><span>Nearest MRT</span>${b.mrt} · ${b.mrt_m} m</div>
+      <div><span>Primary schools ≤1km</span>${b.schools_1km}</div>
+    </div>
+    <h3>Estimated value · ${META.hdb.valuation_month}</h3>
+    ${estimatesTable(b.units, u => `${u.sqm} sqm`)}
+    <div class="note">Typical unit at mid-floor. Sales = resales of that type in this block over 10 years.</div>
+    <p class="note valuation-note" hidden>Estimates describe typical units. Custom size and floor valuations are available in the local edition.</p>
+    <section class="valuation-controls">
+    <h3>Value a specific unit</h3>
+    <form class="unit-form" id="unitForm">
+      <label>Flat type<select name="type">${b.units.map(u => `<option value="${u.type}">${title(u.type)}</option>`).join("")}</select></label>
+      <label>Storey<input name="storey" type="number" min="1" max="${b.floors || 50}" required></label>
+      <label>Size sqm<input name="sqm" type="number" min="25" max="300" step="1" required></label>
+      <button type="submit">Value</button>
+    </form>
+    <div class="unit-result" id="unitResult"></div>
+    </section>
+    <h3>Projected value</h3>
+    <div class="seg" id="scenarios"></div>
+    <div id="forecast" class="chart"></div>
+    <h3>Resale prices, last 5 years</h3>
+    <div id="history" class="chart"></div>
+    <h3>Recent transactions</h3>
+    ${b.tx.length ? `<table><tr><th>Month</th><th>Type</th><th>Storey</th><th class="num">Price</th></tr>${tx}</table>` : '<div class="note">No sales in the last 5 years.</div>'}`;
+}
+
+function privatePanel(kind, p) {
+  const isCondo = kind === "condo";
+  const tx = p.tx.map(t => `<tr><td>${t[0]}</td><td>${isCondo ? t[2] : title(t[5])}</td><td>${t[1]}</td>
+    <td class="num">${sqft(t[3])}</td><td class="num">${fmt$(t[4])}</td></tr>`).join("");
+  const top = [...p.units].sort((a, c) => c.n - a.n)[0];
+  const form = isCondo ? `
+    <form class="unit-form two" id="unitForm">
+      <label>Size sqft<input name="sqft" type="number" min="200" max="10000" step="1" value="${Math.round(top.sqm * SQFT)}" required></label>
+      <label>Floor<input name="floor" type="number" min="1" max="${(p.floors || 40) + 5}" value="${top.floor ?? 5}" required></label>
+      <button type="submit">Value</button>
+    </form>` : `
+    <form class="unit-form" id="unitForm" style="grid-template-columns:1.4fr 1fr auto">
+      <label>House type<select name="type">${p.units.map(u => `<option value="${u.type}">${u.type}</option>`).join("")}</select></label>
+      <label>Land sqft<input name="sqft" type="number" min="500" max="60000" step="1" required></label>
+      <button type="submit">Value</button>
+    </form>`;
+  return `
+    <h2>${privName(p)}</h2>
+    <div class="sub">${KINDS[kind].name} · ${title(p.street)} · District ${p.district} (${p.segment})</div>
+    <div class="facts">
+      <div><span>Tenure</span>${p.tenure.replace(" lease commencing from", " from")}</div>
+      <div><span>Type</span>${p.types.join(", ")}</div>
+      <div><span>Nearest MRT</span>${p.mrt} · ${p.mrt_m} m</div>
+      <div><span>Primary schools ≤1km</span>${p.schools_1km}</div>
+    </div>
+    <h3>Estimated value as a resale · ${META[kind].valuation_month}</h3>
+    ${estimatesTable(p.units, u => `${sqft(u.sqm)} sqft`)}
+    <div class="note">${isCondo ? "Median unit in each size band, at that band's median floor." : "Median land area for each house type here; landed values vary a lot with plot, frontage and condition."}
+      Sales = transactions in the last 5 years. Backtest median error ${(META[kind].eval.MdAPE * 100).toFixed(1)}%.</div>
+    <p class="note valuation-note" hidden>Estimates describe typical homes. Custom unit valuations are available in the local edition.</p>
+    <section class="valuation-controls">
+    <h3>Value a specific ${isCondo ? "unit" : "house"}</h3>
+    ${form}
+    <div class="unit-result" id="unitResult"></div>
+    </section>
+    <h3>Prices psf, last 5 years</h3>
+    <div id="history" class="chart"></div>
+    <div class="note">Projections aren't available for private homes yet: URA only provides 5 years of history.</div>
+    <h3>Recent transactions</h3>
+    ${p.tx.length ? `<table><tr><th>Month</th><th>${isCondo ? "Floor" : "Type"}</th><th>Sale</th><th class="num">sqft</th><th class="num">Price</th></tr>${tx}</table>` : '<div class="note">No sales in the last 5 years.</div>'}`;
+}
+
+// ---------- unit valuation ----------
+async function callApi(path, params, describe) {
+  const out = document.getElementById("unitResult");
+  out.style.display = "block";
+  out.textContent = "Valuing…";
+  let r;
+  try {
+    r = await (await fetch(path + "?" + new URLSearchParams(params))).json();
+  } catch {
+    out.innerHTML = '<span class="warn">Unit valuation needs the API server: run pipeline/server.py</span>';
+    return null;
+  }
+  if (r.error) { out.innerHTML = `<span class="warn">${r.error}</span>`; return null; }
+  out.innerHTML = `<div class="big">${fmt$(r.est)}</div>
+    <div class="range">80% range ${fmtK(r.lo)} – ${fmtK(r.hi)} · $${psf(r.psm).toLocaleString("en-SG")} psf · ${describe}</div>
+    ${r.warnings.map(w => `<div class="warn">${w}</div>`).join("")}`;
+  return r;
+}
+
+function bindHdbForm(b) {
+  const form = document.getElementById("unitForm");
+  const fill = type => {
+    form.sqm.value = b.units.find(u => u.type === type).sqm;
+    form.storey.value = Math.max(1, Math.round((b.floors || 12) / 2));
+  };
+  form.type.value = typicalUnit(b).type;
+  fill(form.type.value);
+  form.type.onchange = () => fill(form.type.value);
+  form.onsubmit = async e => {
+    e.preventDefault();
+    const label = `storey ${form.storey.value}, ${form.sqm.value} sqm`;
+    const r = await callApi("api/estimate", { id: b.id, type: form.type.value, storey: form.storey.value, sqm: form.sqm.value }, label);
+    if (r) { state.unit = { type: form.type.value, est: r.est, label }; drawForecast(b); }
+  };
+}
+
+function bindPrivateForm(kind, p) {
+  const form = document.getElementById("unitForm");
+  if (kind === "landed") {
+    const fill = type => { form.sqft.value = Math.round(p.units.find(u => u.type === type).sqm * SQFT); };
+    form.type.value = [...p.units].sort((a, c) => c.n - a.n)[0].type;
+    fill(form.type.value);
+    form.type.onchange = () => fill(form.type.value);
+  }
+  form.onsubmit = e => {
+    e.preventDefault();
+    const sqm = (+form.sqft.value / SQFT).toFixed(1);
+    const params = { seg: kind, id: p.id, sqm };
+    if (kind === "condo") params.floor = form.floor.value;
+    else params.type = form.type.value;
+    const label = kind === "condo" ? `floor ${form.floor.value}, ${(+form.sqft.value).toLocaleString("en-SG")} sqft`
+                                   : `${form.type.value}, ${(+form.sqft.value).toLocaleString("en-SG")} sqft land`;
+    callApi("api/estimate_private", params, label);
+  };
+}
+
+// ---------- charts ----------
+// Dot plot over time with today's estimate and range at the right edge.
+function drawDots(el, pts, est, fmtY, caption) {
+  if (!pts.length) { el.innerHTML = '<div class="note">No recent sales to chart.</div>'; return; }
+  const W = 358, H = 155, L = 46, R = 10, T = 10, B = 22;
+  const now = new Date(META.hdb.valuation_month + "-01");
+  const x0 = Math.min(...pts.map(p => p.d)), x1 = +now;
+  const ys = [...pts.map(p => p.v), est.lo, est.hi];
+  const pad = (Math.max(...ys) - Math.min(...ys)) * 0.1 || est.v * 0.05;
+  const y0 = Math.min(...ys) - pad, y1 = Math.max(...ys) + pad;
+  const sx = d => L + (d - x0) / (x1 - x0 || 1) * (W - L - R);
+  const sy = v => H - B - (v - y0) / (y1 - y0) * (H - T - B);
+  const ticks = [y0 + (y1 - y0) * 0.15, (y0 + y1) / 2, y1 - (y1 - y0) * 0.15];
+  // Year ticks; under ~1.5 years of history, label first sale month and now instead.
+  let xticks = [];
+  for (let y = new Date(x0).getFullYear() + 1; y <= now.getFullYear(); y++) xticks.push([+new Date(y, 0, 1), String(y), "middle"]);
+  if (xticks.length < 2) {
+    const ym = d => new Date(d).toISOString().slice(0, 7);
+    xticks = [[x0, ym(x0), "start"], [x1, ym(x1), "end"]];
+  }
+  el.innerHTML = `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="${caption}">
+    ${ticks.map(t => `<line class="grid" x1="${L}" x2="${W - R}" y1="${sy(t)}" y2="${sy(t)}"/><text class="axis" x="${L - 6}" y="${sy(t) + 3}" text-anchor="end">${fmtY(t)}</text>`).join("")}
+    ${xticks.map(([d, lab, anchor]) => `<text class="axis" x="${sx(d)}" y="${H - 6}" text-anchor="${anchor}">${lab}</text>`).join("")}
+    ${pts.map(p => `<circle cx="${sx(p.d)}" cy="${sy(p.v)}" r="4" fill="${p.c}" stroke="var(--surface)" stroke-width="2"><title>${p.tip}</title></circle>`).join("")}
+    <line x1="${sx(now)}" x2="${sx(now)}" y1="${sy(est.hi)}" y2="${sy(est.lo)}" stroke="var(--text)" stroke-width="2" stroke-linecap="round"/>
+    <circle cx="${sx(now)}" cy="${sy(est.v)}" r="5" fill="var(--text)" stroke="var(--surface)" stroke-width="2"><title>Estimate ${fmtY(est.v)} (${fmtY(est.lo)}–${fmtY(est.hi)})</title></circle>
+  </svg><div class="note">${caption}</div>`;
+}
+
+function drawHdbChart(b) {
+  const unit = typicalUnit(b), c = KINDS.hdb.ramp[3];
+  const pts = b.tx.filter(t => t[1] === unit.type).map(t => ({ d: new Date(t[0] + "-01"), v: t[4], c, tip: `${t[0]} · storey ${t[2]} · ${fmt$(t[4])}` }));
+  drawDots(document.getElementById("history"), pts, { v: unit.est, lo: unit.lo, hi: unit.hi }, fmtK,
+    `${title(unit.type)} sales (dots) and today's estimate with 80% range (dark bar).`);
+}
+
+function drawPrivateChart(kind, p) {
+  const c = KINDS[kind].ramp[3], top = [...p.units].sort((a, u) => u.n - a.n)[0];
+  const pts = p.tx.map(t => ({ d: new Date(t[0] + "-01"), v: t[4] / t[3] / SQFT, c,
+    tip: `${t[0]} · ${t[1]} · ${sqft(t[3])} sqft · ${fmt$(t[4])}` }));
+  const f = v => "$" + Math.round(v).toLocaleString("en-SG");
+  drawDots(document.getElementById("history"), pts,
+    { v: top.est / top.sqm / SQFT, lo: top.lo / top.sqm / SQFT, hi: top.hi / top.sqm / SQFT }, f,
+    `All sales in $ psf (dots); dark bar = today's estimate for the most-traded ${kind === "condo" ? "size band" : "house type"} (${unitLabel(top.type)}).`);
+}
+
+// ---------- HDB projection ----------
+// r(age) = value relative to a new flat; beyond the oldest observed age it is an
+// assumption (straight line to 0 at 99).
+function relValue(arr, age) {
+  const a = Math.min(Math.max(age, 0), arr.length - 1), i = Math.floor(a), f = a - i;
+  return i + 1 < arr.length ? arr[i] * (1 - f) + arr[i + 1] * f : arr[i];
+}
+const leaseAge = b => {
+  const [y, m] = META.hdb.valuation_month.split("-").map(Number);
+  return y + (m - 1) / 12 - b.lease_start;
+};
+function projection(b, est, rate, years) {
+  const F = META.hdb.forecast.decay, age0 = leaseAge(b), out = [];
+  for (let k = 0; k <= years; k++) {
+    const age = age0 + k;
+    if (age > 99) break;
+    const m = (1 + rate) ** k, ratio = arr => relValue(arr, age) / relValue(arr, age0);
+    const band = [ratio(F.r_lo), ratio(F.r_hi)];
+    out.push({ k, age, v: est * ratio(F.r) * m, lo: est * Math.min(...band) * m, hi: est * Math.max(...band) * m,
+               extrap: age > F.max_observed_age });
+  }
+  return out;
+}
+
+function drawForecast(b) {
+  const el = document.getElementById("forecast"), seg = document.getElementById("scenarios");
+  const S = META.hdb.forecast.scenarios;
+  seg.innerHTML = S.map((s, i) => `<button aria-pressed="${i === state.scenario}" data-i="${i}">${s.name} ${s.rate >= 0 ? "+" : ""}${(s.rate * 100).toFixed(1)}%/yr</button>`).join("");
+  seg.onclick = e => { const t = e.target.closest("button"); if (t) { state.scenario = +t.dataset.i; drawForecast(b); } };
+
+  const unit = state.unit || { ...typicalUnit(b), label: "typical unit" };
+  const H_YRS = [5, 10, 20], startYear = +META.hdb.valuation_month.slice(0, 4);
+  const pts = projection(b, unit.est, S[state.scenario].rate, 20);
+  const decay10 = projection(b, 1, 0, 10);
+  const lease10 = decay10.length > 10 ? (decay10[10].v - 1) * 100 : null;
+
+  const W = 358, Hh = 160, L = 46, R = 10, T = 10, B = 22;
+  const ys = pts.flatMap(p => [p.lo, p.hi]);
+  const pad = (Math.max(...ys) - Math.min(...ys)) * 0.08 || unit.est * 0.05;
+  const y0 = Math.max(0, Math.min(...ys) - pad), y1 = Math.max(...ys) + pad;
+  const last = pts[pts.length - 1].k || 1;
+  const sx = k => L + k / last * (W - L - R), sy = v => Hh - B - (v - y0) / (y1 - y0) * (Hh - T - B);
+  const path = arr => arr.map((p, i) => `${i ? "L" : "M"}${sx(p.k).toFixed(1)},${sy(p.v).toFixed(1)}`).join("");
+  const seen = pts.filter(p => !p.extrap), beyond = pts.filter((p, i) => p.extrap || (pts[i + 1] && pts[i + 1].extrap));
+  const band = `M${pts.map(p => `${sx(p.k)},${sy(p.hi)}`).join("L")}L${[...pts].reverse().map(p => `${sx(p.k)},${sy(p.lo)}`).join("L")}Z`;
+  const ticks = [y0 + (y1 - y0) * 0.15, (y0 + y1) / 2, y1 - (y1 - y0) * 0.15];
+  const xt = [0, 5, 10, 15, 20].filter(k => k <= last);
+  const row = s => `<tr><td>${s.name}</td>${H_YRS.map(h => {
+    const p = projection(b, unit.est, s.rate, h)[h];
+    return `<td class="num">${p ? fmtK(p.v) : "–"}</td>`;
+  }).join("")}</tr>`;
+  const line = KINDS.hdb.ramp[4];
+
+  el.innerHTML = `
+    <div class="headline">${lease10 == null ? "Lease expires within 10 years." :
+      `Lease decay alone: <b>${lease10 >= 0 ? "+" : ""}${lease10.toFixed(1)}%</b> vs the market over 10 years (${Math.round(99 - leaseAge(b) - 10)} yrs left in ${startYear + 10}).`}</div>
+    <svg viewBox="0 0 ${W} ${Hh}" role="img" aria-label="Projected value of ${unit.type} over ${last} years">
+      ${ticks.map(t => `<line class="grid" x1="${L}" x2="${W - R}" y1="${sy(t)}" y2="${sy(t)}"/><text class="axis" x="${L - 6}" y="${sy(t) + 3}" text-anchor="end">${fmtK(t)}</text>`).join("")}
+      ${xt.map(k => `<text class="axis" x="${sx(k)}" y="${Hh - 6}" text-anchor="${k === last ? "end" : "middle"}">${startYear + k}</text>`).join("")}
+      <path d="${band}" fill="${KINDS.hdb.ramp[0]}" opacity="0.6"/>
+      <path d="${path(seen)}" fill="none" stroke="${line}" stroke-width="2" stroke-linejoin="round"/>
+      ${beyond.length > 1 ? `<path d="${path(beyond)}" fill="none" stroke="${line}" stroke-width="2" stroke-dasharray="4 3"/>` : ""}
+      ${pts.map(p => `<circle cx="${sx(p.k)}" cy="${sy(p.v)}" r="7" fill="transparent"><title>${startYear + p.k}: ${fmt$(p.v)} (${Math.round(99 - p.age)} yrs left)</title></circle>`).join("")}
+    </svg>
+    <div class="note">${title(unit.type)}, ${unit.label}. Band = lease-decay uncertainty only; market path is a scenario, not a prediction.${beyond.length > 1 ? " Dashed = older than any flat sold so far; assumes value falls in a straight line to $0 at 99 years." : ""}</div>
+    <table style="margin-top:8px"><tr><th>Scenario</th>${H_YRS.map(h => `<th class="num">${startYear + h}</th>`).join("")}</tr>${S.map(row).join("")}</table>
+    <div class="note">Lease-decay model backtest (2017–18 → 2024–26): relative-value error ${(META.hdb.forecast.backtest.rmse_decay_model * 100).toFixed(1)}% vs ${(META.hdb.forecast.backtest.rmse_no_change * 100).toFixed(1)}% assuming no change.</div>`;
+}
+
+// ---------- search & controls ----------
+const q = document.getElementById("q"), results = document.getElementById("results");
+let matches = [];
+function searchIndex() {
+  return [
+    ...DATA.hdb.map(b => ({ kind: "hdb", x: b, text: `${b.block} ${b.street} ${b.town}`, label: `Blk ${b.block} ${title(b.street)}`, sub: title(b.town), block: b.block })),
+    ...["condo", "landed"].flatMap(k => DATA[k].map(p => ({ kind: k, x: p, text: `${p.project} ${p.street} D${p.district}`, label: privName(p), sub: title(p.street) }))),
+  ];
+}
+let INDEX = [];
+q.addEventListener("input", () => {
+  const terms = q.value.toUpperCase().replace(/\bBLK\b/g, "").split(/\s+/).filter(Boolean);
+  if (!terms.length) { results.style.display = "none"; return; }
+  const numeric = /^\d/.test(terms[0]);
+  matches = INDEX.filter(e => state.show[e.kind] && terms.every(t => e.text.includes(t)) &&
+    (!numeric || e.kind !== "hdb" || e.block.startsWith(terms[0]))).slice(0, 8);
+  results.innerHTML = matches.map((m, i) => `<li data-i="${i}"><span class="kind">${KINDS[m.kind].name}</span>${m.label} <span class="range">${m.sub}</span></li>`).join("");
+  results.style.display = matches.length ? "block" : "none";
+});
+results.addEventListener("click", e => {
+  const li = e.target.closest("li");
+  if (!li) return;
+  const m = matches[+li.dataset.i];
+  select(m.kind, m.x, true);
+  results.style.display = "none";
+});
+q.addEventListener("keydown", e => {
+  if (e.key === "Enter" && matches[0]) { select(matches[0].kind, matches[0].x, true); results.style.display = "none"; }
+});
+
+document.getElementById("layers").innerHTML = Object.entries(KINDS).map(([k, K]) =>
+  `<label><input type="checkbox" data-k="${k}" checked><span class="dot" style="background:${K.ramp[3]}"></span>${K.name}</label>`).join("");
+document.getElementById("layers").addEventListener("change", e => {
+  state.show[e.target.dataset.k] = e.target.checked; render();
+});
+document.getElementById("type").addEventListener("change", e => {
+  state.type = e.target.value; computeBreaks(); render();
+  if (state.sel && state.sel.kind === "hdb") select("hdb", state.sel.item);
+});
+document.getElementById("budget").addEventListener("input", e => {
+  state.budget = e.target.value ? +e.target.value : null; render();
+});
+document.getElementById("toggle3d").addEventListener("click", e => {
+  state.is3d = !state.is3d;
+  e.target.setAttribute("aria-pressed", state.is3d);
+  map.easeTo({ pitch: state.is3d ? 45 : 0 });
+  render();
+});
+
+// ---------- load ----------
+Promise.all([
+  ...["blocks", "condo", "landed"].map(async name => {
+    const response = await fetch(`data/${name}.json`);
+    if (!response.ok) throw new Error(`Unable to load ${name}: ${response.status}`);
+    return response.json();
+  }),
+]).then(([hdb, condo, landed]) => {
+  DATA.hdb = hdb.blocks; META.hdb = hdb.meta;
+  DATA.condo = condo.projects; META.condo = condo.meta;
+  DATA.landed = landed.projects; META.landed = landed.meta;
+  INDEX = searchIndex();
+  const types = [...new Set(DATA.hdb.flatMap(b => b.units.map(u => u.type)))].sort();
+  document.getElementById("type").insertAdjacentHTML("beforeend",
+    types.map(t => `<option value="${t}">HDB: ${title(t)}</option>`).join(""));
+  computeBreaks();
+  document.getElementById("loading").remove();
+  const start = () => {
+    render();
+    // Deep link: #<kind>:<id>, or a bare HDB id from older links.
+    const h = decodeURIComponent(location.hash.slice(1));
+    const m = h.match(/^(hdb|condo|landed):(.*)$/);
+    const [kind, id] = m ? [m[1], m[2]] : ["hdb", h];
+    const x = id && DATA[kind].find(x => x.id === id);
+    if (x) select(kind, x, true);
+  };
+  map.loaded() ? start() : map.on("load", start);
+}).catch(error => {
+  console.error(error);
+  const loading = document.getElementById("loading");
+  if (loading) loading.textContent = "Unable to load home data. Please refresh to try again.";
+});
+</script>
+</body>
+</html>
