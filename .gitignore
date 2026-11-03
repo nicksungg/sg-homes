@@ -8,3 +8,6 @@ __pycache__/
 /models/
 /dist/
 .DS_Store
+
+# Lorong: generated demo data, the SQLite store and health logs
+/lorong/data/

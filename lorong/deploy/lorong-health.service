@@ -1,0 +1,9 @@
+[Unit]
+Description=Check Lorong pages and valuations, and recover the local server
+After=lorong.service
+
+[Service]
+Type=oneshot
+WorkingDirectory=/home/nicksung/Desktop/nicksung/sg-homes-lorong/lorong
+ExecStart=/home/nicksung/Desktop/nicksung/sg-homes/.venv/bin/python scripts/check_host.py
+TimeoutStartSec=120

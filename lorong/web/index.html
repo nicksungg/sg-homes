@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lorong</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 26 26'%3E%3Crect width='26' height='26' rx='7' fill='%230a3d30'/%3E%3Cpath d='M6 19V11l7-5 7 5v8h-5v-5h-4v5z' fill='%23e9c27a'/%3E%3C/svg%3E">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,500;0,9..144,600;0,9..144,700;1,9..144,500&family=Inter:wght@400;500;600;700&display=swap">
+<link rel="stylesheet" href="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.css">
+<link rel="stylesheet" href="styles.css">
+<script src="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.js"></script>
+<script src="https://unpkg.com/deck.gl@9.0.38/dist.min.js"></script>
+</head>
+<body>
+<header class="top">
+  <div class="wrap">
+    <a class="logo" href="#/">
+      <svg viewBox="0 0 26 26" aria-hidden="true"><rect width="26" height="26" rx="7" fill="#0a3d30"/><path d="M6 19V11l7-5 7 5v8h-5v-5h-4v5z" fill="#e9c27a"/></svg>
+      Lorong
+    </a>
+    <nav class="main" id="nav">
+      <a href="#/search?mode=sale" data-nav="sale">Buy</a>
+      <a href="#/search?mode=rent" data-nav="rent">Rent</a>
+      <a href="#/map" data-nav="map">Value map</a>
+      <a href="#/value" data-nav="value">What's it worth?</a>
+      <a href="#/projects" data-nav="projects">Condos</a>
+      <a href="#/trends" data-nav="trends">Trends</a>
+      <a href="#/tools" data-nav="tools">Calculators</a>
+    </nav>
+    <div class="top-actions">
+      <a class="pill-link" href="#/shortlist" aria-label="Shortlist">♥ <b id="nShort">0</b></a>
+      <a class="pill-link" href="#/compare">Compare <b id="nCompare">0</b></a>
+      <a class="pill-link sell" href="#/sell">List a home</a>
+    </div>
+  </div>
+</header>
+<main id="main"><div class="wrap"><p class="muted" style="padding:40px 0">Loading listings…</p></div></main>
+<div id="dock"></div>
+<footer>
+  <div class="wrap">
+    <div class="cols">
+      <div>
+        <div class="logo">Lorong</div>
+        <p>Singapore homes, with an independent estimate next to every asking price.</p>
+      </div>
+      <div><h4>Explore</h4><a href="#/search?mode=sale">Homes for sale</a><a href="#/search?mode=rent">Homes for rent</a><a href="#/projects">Condo directory</a><a href="#/projects?new=1">New launches</a></div>
+      <div><h4>Values</h4><a href="#/map">Value map</a><a href="#/value">What's my home worth?</a><a href="#/trends">Market trends</a><a href="#/about">How we value homes</a></div>
+      <div><h4>Tools</h4><a href="#/tools#afford">Affordability</a><a href="#/tools#mortgage">Mortgage</a><a href="#/tools#stamp">Stamp duty</a><a href="#/sell">List a home</a></div>
+    </div>
+    <p class="fine"><b>Lorong is a demo.</b> Listings, agents, agencies, rents and photos are synthetic placeholders. Each listing sits
+    on a real HDB block or private project, and estimates come from the sg-homes models, trained on public HDB resale data
+    (data.gov.sg) and URA private transactions. Calculator rules reflect 2023 regulations; check IRAS, MAS and HDB.
+    Maps © OpenStreetMap contributors © CARTO.</p>
+  </div>
+</footer>
+<script src="app.js"></script>
+</body>
+</html>

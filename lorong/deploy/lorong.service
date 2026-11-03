@@ -1,0 +1,21 @@
+[Unit]
+Description=Lorong property portal (built on sg-homes)
+After=network-online.target sg-homes.service
+
+[Service]
+Type=simple
+WorkingDirectory=/home/nicksung/Desktop/nicksung/sg-homes-lorong/lorong
+Environment=SG_HOMES_DIR=/home/nicksung/Desktop/nicksung/sg-homes
+Environment=OMP_NUM_THREADS=2
+Environment=OPENBLAS_NUM_THREADS=2
+Environment=SG_HOMES_MODEL_THREADS=2
+ExecStart=/home/nicksung/Desktop/nicksung/sg-homes/.venv/bin/python -u app.py 8780
+Restart=always
+RestartSec=5
+TimeoutStopSec=15
+NoNewPrivileges=true
+PrivateTmp=true
+UMask=0077
+
+[Install]
+WantedBy=default.target
